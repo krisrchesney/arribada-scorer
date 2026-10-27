@@ -1,0 +1,88 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Arribada Scorer tests</title>
+<style>body{font:14px/1.5 ui-monospace,Consolas,monospace;margin:16px}.ok{color:#2E7D4F}.bad{color:#C2352B}</style>
+<pre id="out"></pre>
+<script type="module">
+import { score, emptyBoard } from "../js/scoring.js";
+import { check } from "../js/checks.js";
+import { CELL, warp, readBoard, guessCorners, trainingCrops } from "../js/vision.js";
+
+const out = document.getElementById("out");
+let pass = 0, fail = 0;
+const log = (ok, msg) => { ok ? pass++ : fail++; out.innerHTML += `<span class="${ok ? "ok" : "bad"}">${ok ? "PASS" : "FAIL"}</span> ${msg}\n`; };
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// Rulebook p.14 example: top half of an 11x11 board (1-indexed row, col).
+{
+  const cells = emptyBoard(11);
+  const put = (r, c, owner, v) => (cells[r - 1][c - 1] = { owner, v });
+  const P = "pink", G = "green", B = "blue";
+  [[1,4,P,7],[1,6,P,5],[1,7,P,5],[1,8,P,2],[1,9,P,7],[2,4,P,7],[2,5,P,6],[2,6,P,5],[2,7,P,4],[2,8,P,3],
+   [3,2,B,4],[3,3,B,5],[3,4,P,"W"],[3,5,P,1],[3,6,P,2],[3,7,G,2],[3,9,B,3],[3,10,B,2],[3,11,B,1],
+   [4,2,B,7],[4,3,B,6],[4,4,B,7],[4,6,G,3],[4,7,G,3],[4,8,G,3],
+   [5,1,G,2],[5,2,G,2],[5,3,B,"W"],[5,4,B,8],[5,6,B,2],[5,7,G,"W"],[5,8,G,4],[6,3,B,4],[6,4,B,4]]
+    .forEach((a) => put(...a));
+  [[1,3,3],[1,5,6],[3,1,4],[5,5,8],[5,9,8]].forEach(([r, c, v]) => put(r, c, null, v));
+  const s = score({ size: 11, cells, players: [P, G, B] });
+  log(s.res.pink.strand === -10 && s.res.green.strand === -4 && s.res.blue.strand === -2,
+    `rulebook example stranded: pink ${s.res.pink.strand} (want -10), green ${s.res.green.strand} (-4), blue ${s.res.blue.strand} (-2)`);
+  log(s.counts[1].pink === 6 && s.counts[1].green === 6 && s.counts[1].blue === 3, "rulebook example upper-right counts 6/6/3");
+  log(s.res.pink.q[1] === 18 && s.res.green.q[1] === 18 && s.res.blue.q[1] === 10, "upper-right tie splits 36 into 18/18, blue 10");
+  log(s.counts[0].blue === 9 && s.res.blue.q[0] === 20, "upper-left blue 9 tiles scores 20");
+}
+
+// 2-player penalties.
+{
+  const cells = emptyBoard(9);
+  [[0,0,1],[0,1,2],[0,2,3]].forEach(([r,c,v]) => cells[r][c] = { owner: "pink", v });
+  const s = score({ size: 9, cells, players: ["pink", "purple"] });
+  log(s.res.pink.q[0] === 10 && s.res.purple.q[0] === -10, "2p: 3 vs 0 tiles gives +10 / -10");
+  log(s.res.pink.q[1] === 0 && s.res.purple.q[1] === 0, "2p: empty quadrant scores nothing");
+}
+
+// Checks.
+{
+  const cells = emptyBoard(9);
+  for (let c = 0; c < 9; c++) for (let r = 0; r < 2; r++) cells[r][c] = { owner: null, v: 8 };
+  const issues = check({ size: 9, cells, players: ["pink", "purple"] });
+  log(issues.some((i) => i.text.includes("only has 10")), "check flags 18 eights");
+}
+
+// Photo pipeline on the sample photo (local only; photos are not committed).
+try {
+  const img = new Image(); img.src = "photo1.webp"; await img.decode();
+  const cv = document.createElement("canvas"); cv.width = img.width; cv.height = img.height;
+  const ctx = cv.getContext("2d"); ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, cv.width, cv.height);
+  const corners = [[80, 43], [593, 43], [593, 556], [80, 556]];
+  out.innerHTML += `guessCorners: ${JSON.stringify(guessCorners(data).map((p) => p.map(Math.round)))}\n`;
+  const t0 = performance.now();
+  const w = warp(data, corners, 9 * CELL);
+  const res = await readBoard(w, 9);
+  const ms = performance.now() - t0;
+  const expect = emptyBoard(9);
+  const put = (r, c, owner, v) => (expect[r - 1][c - 1] = { owner, v });
+  put(3,3,null,7); put(3,5,null,1); put(3,6,"pink",1); put(3,7,"pink","W");
+  put(4,7,"purple",4); put(4,8,"purple",4);
+  put(5,6,"purple",6); put(5,7,"purple",5); put(5,8,"purple",4); put(5,9,"purple",4);
+  put(5,3,null,8); put(6,7,"pink",3); put(7,3,null,7); put(7,5,null,5); put(7,7,null,4);
+  let right = 0, total = 0;
+  const wrong = [];
+  for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+    total++;
+    if (eq(res.cells[r][c], expect[r][c])) right++;
+    else wrong.push(`(${r + 1},${c + 1}) got ${JSON.stringify(res.cells[r][c])} want ${JSON.stringify(expect[r][c])}`);
+  }
+  log(right === total, `photo1: ${right}/${total} spaces right in ${ms.toFixed(0)} ms, rotation ${res.rotation}, unsure [${[...res.unsure].join(" ")}]`);
+  wrong.forEach((x) => (out.innerHTML += "   " + x + "\n"));
+  window.photo1Training = { app: "arribada-scorer", version: 1, size: 9, players: ["pink", "purple"], rotation: 0,
+    cells: expect, crops: trainingCrops(w, 9, 0, expect) };
+  const wc = document.createElement("canvas"); wc.width = wc.height = 9 * CELL; wc.getContext("2d").putImageData(w, 0, 0);
+  document.body.append(wc);
+} catch (e) {
+  out.innerHTML += `(photo test skipped: ${e.message || e})\n`;
+}
+out.innerHTML += `\n${pass} passed, ${fail} failed\n`;
+document.title = `${fail ? "FAIL" : "PASS"} ${pass}/${pass + fail}`;
+</script>
