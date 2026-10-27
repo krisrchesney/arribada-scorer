@@ -1,0 +1,447 @@
+<title>Arribada Scorer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+/* Layout: two-column workbench (board left, tally right) that stacks on phones; the board is the hero. */
+:root{
+  --bg:#EDF3F1; --surface:#FFFFFF; --ink:#12302F; --muted:#56706C; --line:#C8D7D3;
+  --accent:#0E7C76; --accent-ink:#FFFFFF;
+  --sand:#EBCB8F; --sand-2:#E2BC77; --nest:#7A4A26; --rock:#2B2522; --dots:#4F6B73;
+  --danger:#C2352B; --danger-soft:#F9E1DE; --good:#2E7D4F;
+  --tile:#F7F4EC; --tile-ink:#3A3A3A;
+  --p-pink:#E5507A; --p-purple:#8A5CC9; --p-green:#A3BC17; --p-blue:#1E9FA8;
+  --f-display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body:"Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0C1A1B; --surface:#132627; --ink:#E2EEEB; --muted:#8EA7A2; --line:#24403E;
+  --accent:#3FC1B5; --accent-ink:#06201E;
+  --sand:#B89458; --sand-2:#A68247; --nest:#4B2D16; --rock:#0B0908; --dots:#24343A;
+  --danger:#FF6B5E; --danger-soft:#3A1916; --good:#5BC98A;
+  --tile:#EDE9DF; --tile-ink:#2A2A2A; color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0C1A1B; --surface:#132627; --ink:#E2EEEB; --muted:#8EA7A2; --line:#24403E;
+  --accent:#3FC1B5; --accent-ink:#06201E;
+  --sand:#B89458; --sand-2:#A68247; --nest:#4B2D16; --rock:#0B0908; --dots:#24343A;
+  --danger:#FF6B5E; --danger-soft:#3A1916; --good:#5BC98A;
+  --tile:#EDE9DF; --tile-ink:#2A2A2A; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 40px}
+.wrap{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+h1{font-family:var(--f-display);font-weight:800;font-size:clamp(28px,5vw,40px);line-height:1;margin:0;letter-spacing:-.01em}
+h1 span{color:var(--accent)}
+.sub{color:var(--muted);margin:6px 0 0;max-width:60ch}
+h2{font-family:var(--f-display);font-weight:600;font-size:19px;margin:0;text-wrap:balance}
+.label{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:860px){.grid{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button,.btn{font:inherit;font-weight:700;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:8px 14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+button:hover,.btn:hover{border-color:var(--accent)}
+button:focus-visible,.btn:focus-within,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.btn input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.status{font-size:14px;color:var(--muted);min-height:1.5em}
+.status.err{color:var(--danger)}
+.photo{display:flex;gap:12px;align-items:flex-start}
+.photo img{width:96px;height:96px;object-fit:cover;border-radius:10px;border:1px solid var(--line);flex:none}
+
+/* Board */
+.boardbox{overflow-x:auto}
+.board{--n:9;display:grid;grid-template-columns:repeat(var(--n),1fr);background:var(--sand);border:6px solid var(--sand-2);border-radius:10px;
+  width:100%;max-width:560px;aspect-ratio:1;margin:0 auto;min-width:300px}
+.cell{position:relative;border:0;border-radius:0;padding:0;background:transparent;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12);display:grid;place-items:center;cursor:pointer;min-width:0}
+.cell.nest::before{content:"";position:absolute;inset:14%;border-radius:50%;background:radial-gradient(circle,var(--nest) 25%,transparent 72%);opacity:.8}
+.cell.qR{border-right:3px dotted var(--dots)}
+.cell.qB{border-bottom:3px dotted var(--dots)}
+.cell.sel{box-shadow:inset 0 0 0 3px var(--accent);z-index:2}
+.cell.unsure::after{content:"?";position:absolute;top:1px;right:3px;font-size:10px;font-weight:700;color:var(--danger)}
+.rock{width:78%;height:70%;background:var(--rock);border-radius:46% 54% 50% 50%/55% 50% 50% 45%;position:relative}
+.tile{position:relative;width:80%;height:80%;border-radius:42% 42% 46% 46%;background:var(--tile);color:var(--tile-ink);display:grid;place-items:center;
+  font-weight:700;font-size:clamp(11px,2.6vw,18px);box-shadow:0 1px 2px rgba(0,0,0,.35)}
+.tile .disc{width:76%;height:76%;border-radius:50%;display:grid;place-items:center;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,.4)}
+.tile.strand{box-shadow:0 0 0 3px var(--danger),0 1px 2px rgba(0,0,0,.35)}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--muted)}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:50%;vertical-align:-1px;margin-right:5px}
+
+/* Editor */
+.editor{border-top:1px solid var(--line);padding-top:14px;display:flex;flex-direction:column;gap:10px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{padding:6px 11px;font-size:14px}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.dot{width:11px;height:11px;border-radius:50%;display:inline-block}
+.num{min-width:38px;justify-content:center;font-variant-numeric:tabular-nums}
+
+/* Results */
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{padding:8px 6px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
+tfoot td{font-weight:700;font-size:17px;border-bottom:0}
+.tablebox{overflow-x:auto}
+.neg{color:var(--danger)}
+.pos{color:var(--good)}
+.who{display:inline-flex;align-items:center;gap:7px;font-weight:700}
+.trk{width:72px;font:inherit;text-align:right;padding:4px 6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+.winner{background:var(--accent);color:var(--accent-ink);border-radius:999px;padding:1px 8px;font-size:12px;margin-left:4px}
+.qcards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.q{border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:14px;display:flex;flex-direction:column;gap:4px}
+.q .label{margin-bottom:2px}
+.q div{display:flex;justify-content:space-between;gap:8px;font-variant-numeric:tabular-nums}
+.note{font-size:13px;color:var(--muted)}
+.strandlist{font-size:14px;color:var(--muted)}
+.warn{background:var(--danger-soft);color:var(--danger);border-radius:10px;padding:8px 12px;font-size:14px}
+@media (prefers-reduced-motion:no-preference){.cell .tile{transition:transform .12s}.cell:hover .tile{transform:scale(1.06)}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Arribada <span>Scorer</span></h1>
+      <p class="sub">Photograph the board at game end. Claude reads the tiles, you fix anything it got wrong, and the page does final scoring: stranded tiles, then quadrant majorities.</p>
+    </div>
+  </header>
+
+  <div class="grid">
+    <section class="panel" aria-label="Board">
+      <div class="row" style="justify-content:space-between">
+        <h2>1. Board</h2>
+        <div class="row">
+          <label class="btn primary" id="shootLbl">Take or upload photo
+            <input type="file" id="shoot" accept="image/*" capture="environment">
+          </label>
+        </div>
+      </div>
+      <div class="photo" id="photoRow" hidden>
+        <img id="photoImg" alt="Your board photo">
+        <div class="status" id="status" role="status"></div>
+      </div>
+      <div class="status" id="status0" role="status">Showing an example board. Tap any space to change it.</div>
+
+      <div class="boardbox"><div class="board" id="board" role="grid" aria-label="Board grid"></div></div>
+
+      <div class="legend">
+        <span><i style="background:var(--danger)"></i>Red ring = stranded</span>
+        <span><i style="background:var(--tile);box-shadow:0 0 0 1px var(--line)"></i>No shell = neutral</span>
+        <span>Dotted lines = quadrants</span>
+      </div>
+
+      <div class="editor" id="editor">
+        <div class="row" style="justify-content:space-between">
+          <span class="label" id="selLabel">Tap a space to edit</span>
+          <div class="row">
+            <button class="chip" id="sz9" aria-pressed="true">2p board (9×9)</button>
+            <button class="chip" id="sz11" aria-pressed="false">3–4p board (11×11)</button>
+          </div>
+        </div>
+        <div id="cellTools" hidden>
+          <div class="chips" id="ownerChips" style="margin-bottom:8px"></div>
+          <div class="chips" id="valChips"></div>
+        </div>
+        <div class="row">
+          <span class="label">Players</span>
+          <div class="chips" id="playerChips"></div>
+        </div>
+        <div class="row">
+          <button class="chip" id="clearBtn">Clear board</button>
+          <button class="chip" id="exampleBtn">Load example</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Final scoring">
+      <h2>2. Final scoring</h2>
+      <div id="warn" class="warn" hidden></div>
+      <div class="tablebox"><table id="tally"></table></div>
+      <p class="note">Enter each score-track position (add 50 per seashell) to get final totals. Majorities count only tiles left after stranded tiles come off.</p>
+      <div class="qcards" id="quads"></div>
+      <div class="strandlist" id="strands"></div>
+      <p class="note" id="rulesNote"></p>
+    </section>
+  </div>
+</div>
+
+<script>
+const COLORS = {pink:"Pink",green:"Green",blue:"Blue",purple:"Purple"};
+const cssColor = c => `var(--p-${c})`;
+const QNAMES = ["Upper left","Upper right","Lower right","Lower left"];
+
+let state = {size:9, cells:[], players:["pink","purple"], track:{}, sel:null, unsure:new Set()};
+
+function blank(n){ return Array.from({length:n},()=>Array(n).fill(null)); }
+function placeRock(){ const c=(state.size-1)/2; state.cells[c][c]={rock:true}; }
+
+function loadExample(){
+  state.size=9; state.cells=blank(9); placeRock(); state.unsure=new Set();
+  const put=(r,c,owner,v)=>state.cells[r-1][c-1]={owner,v};
+  put(3,3,null,7); put(3,5,null,1); put(3,6,"pink",1); put(3,7,"pink","W");
+  put(4,7,"purple",4); put(4,8,"purple",4);
+  put(5,6,"purple",6); put(5,7,"purple",5); put(5,8,"purple",4); put(5,9,"purple",4);
+  put(6,7,"pink",3); put(7,3,null,7); put(7,5,null,5); put(7,7,null,4);
+  state.players=["pink","purple"]; state.sel=null;
+}
+
+/* Quadrants form a pinwheel around the center rock. */
+function quadrant(r,c,n){
+  const m=(n-1)/2;
+  if(r===m&&c===m) return null;
+  if(r<=m&&c<m) return 0;
+  if(r<m&&c>=m) return 1;
+  if(r>=m&&c>m) return 2;
+  return 3;
+}
+
+/* Three tiles in a row (any path) form a set or a sequence; wilds (null) match anything. */
+function fits(a,b,c){
+  const xs=[a,b,c], known=xs.filter(x=>x!=null);
+  if(known.every(x=>x===known[0])) return true;
+  for(let s=1;s<=6;s++) for(const exp of [[s,s+1,s+2],[s+2,s+1,s]])
+    if(xs.every((x,i)=>x==null||x===exp[i])) return true;
+  return false;
+}
+const val = t => t.v==="W"?null:t.v;
+const owned = (r,c) => { const t=state.cells[r]?.[c]; return t&&!t.rock&&t.owner?t:null; };
+
+function grouped(){
+  const n=state.size, g=new Set();
+  for(let r=0;r<n;r++) for(let c=0;c<n;c++){
+    const t=owned(r,c); if(!t) continue;
+    const nb=[[r-1,c],[r+1,c],[r,c-1],[r,c+1]].filter(([y,x])=>owned(y,x)?.owner===t.owner);
+    for(let i=0;i<nb.length;i++) for(let j=i+1;j<nb.length;j++){
+      const A=owned(...nb[i]), B=owned(...nb[j]);
+      if(fits(val(A),val(t),val(B))){ g.add(nb[i]+""); g.add(nb[j]+""); g.add([r,c]+""); }
+    }
+  }
+  return g;
+}
+
+function secondPenalty(k){ return k===0?-10:k<=2?-5:k===3?-2:0; }
+
+function score(){
+  const n=state.size, g=grouped(), P=state.players;
+  const res={}; P.forEach(p=>res[p]={strand:0,strandTiles:[],q:[0,0,0,0]});
+  const counts=[0,1,2,3].map(()=>Object.fromEntries(P.map(p=>[p,0])));
+  const stranded=new Set(), foreign=new Set();
+  for(let r=0;r<n;r++) for(let c=0;c<n;c++){
+    const t=owned(r,c); if(!t) continue;
+    if(!res[t.owner]){ foreign.add(t.owner); continue; }
+    if(g.has([r,c]+"")){ const q=quadrant(r,c,n); if(q!=null) counts[q][t.owner]++; }
+    else { stranded.add([r,c]+""); res[t.owner].strand-= t.v==="W"?0:t.v; res[t.owner].strandTiles.push(t.v==="W"?"wild":t.v); }
+  }
+  const twoP = n===9;
+  counts.forEach((cnt,q)=>{
+    if(twoP){
+      if(P.length!==2) return;
+      const [a,b]=P, ca=cnt[a], cb=cnt[b];
+      if(ca===0&&cb===0) return;
+      if(ca===cb){ const each=Math.floor((10+secondPenalty(ca))/2); res[a].q[q]=each; res[b].q[q]=each; }
+      else { const [w,l]=ca>cb?[a,b]:[b,a]; res[w].q[q]=10; res[l].q[q]=secondPenalty(cnt[l]); }
+    } else {
+      const pts=[20,16,10,8];
+      const ranked=P.filter(p=>cnt[p]>0).sort((x,y)=>cnt[y]-cnt[x]);
+      let i=0;
+      while(i<ranked.length){
+        let j=i; while(j<ranked.length&&cnt[ranked[j]]===cnt[ranked[i]]) j++;
+        let sum=0; for(let k=i;k<j;k++) sum+=pts[k]||0;
+        for(let k=i;k<j;k++) res[ranked[k]].q[q]=Math.floor(sum/(j-i));
+        i=j;
+      }
+    }
+  });
+  return {res,counts,stranded,foreign:[...foreign]};
+}
+
+/* ---------- rendering ---------- */
+const $=id=>document.getElementById(id);
+const fmt=v=>v>0?`+${v}`:`${v}`;
+const cls=v=>v<0?"neg":v>0?"pos":"";
+
+function render(){
+  const n=state.size, {res,counts,stranded,foreign}=score();
+  const b=$("board"); b.style.setProperty("--n",n); b.innerHTML="";
+  for(let r=0;r<n;r++) for(let c=0;c<n;c++){
+    const t=state.cells[r][c], q=quadrant(r,c,n);
+    const el=document.createElement("button");
+    el.className="cell"; el.setAttribute("role","gridcell");
+    if(r%2===0&&c%2===0&&q!=null) el.classList.add("nest");
+    if(q!=null&&c<n-1){ const q2=quadrant(r,c+1,n); if(q2!=null&&q2!==q) el.classList.add("qR"); }
+    if(q!=null&&r<n-1){ const q2=quadrant(r+1,c,n); if(q2!=null&&q2!==q) el.classList.add("qB"); }
+    if(state.sel&&state.sel[0]===r&&state.sel[1]===c) el.classList.add("sel");
+    if(state.unsure.has(r+","+c)) el.classList.add("unsure");
+    let desc="empty";
+    if(t?.rock){ el.innerHTML='<div class="rock"></div>'; desc="rock"; }
+    else if(t){
+      const v=t.v==="W"?"":t.v, tile=document.createElement("div");
+      tile.className="tile"+(stranded.has(r+","+c)?" strand":"");
+      if(t.owner){ tile.innerHTML=`<div class="disc" style="background:${cssColor(t.owner)}">${v}</div>`; desc=`${COLORS[t.owner]} ${t.v==="W"?"wild":t.v}`; }
+      else { tile.textContent=v; desc=`neutral ${v}`; }
+      el.append(tile);
+    }
+    el.setAttribute("aria-label",`Row ${r+1} column ${c+1}: ${desc}`);
+    el.onclick=()=>{ state.sel=[r,c]; render(); };
+    b.append(el);
+  }
+  renderEditor(); renderTally(res,counts,foreign);
+}
+
+function chip(label,pressed,onclick,extra){
+  const bt=document.createElement("button"); bt.className="chip"+(extra?" "+extra:"");
+  bt.setAttribute("aria-pressed",pressed?"true":"false"); bt.innerHTML=label; bt.onclick=onclick; return bt;
+}
+
+function renderEditor(){
+  $("sz9").setAttribute("aria-pressed",state.size===9); $("sz11").setAttribute("aria-pressed",state.size===11);
+  const pc=$("playerChips"); pc.innerHTML="";
+  Object.keys(COLORS).forEach(k=>pc.append(chip(`<span class="dot" style="background:${cssColor(k)}"></span>${COLORS[k]}`,state.players.includes(k),()=>{
+    state.players=state.players.includes(k)?state.players.filter(p=>p!==k):[...state.players,k]; render();
+  })));
+  const tools=$("cellTools");
+  if(!state.sel){ tools.hidden=true; $("selLabel").textContent="Tap a space to edit"; return; }
+  const [r,c]=state.sel, t=state.cells[r][c];
+  tools.hidden=false; $("selLabel").textContent=`Row ${r+1}, column ${c+1}`;
+  const set=(nt)=>{ state.cells[r][c]=nt; state.unsure.delete(r+","+c); render(); };
+  const oc=$("ownerChips"); oc.innerHTML="";
+  oc.append(chip("Empty",!t,()=>set(null)));
+  oc.append(chip("Neutral",t&&!t.rock&&!t.owner,()=>set({owner:null,v:t&&!t.rock&&t.v!=="W"?t.v:1})));
+  const owners=[...new Set([...state.players,...(t?.owner?[t.owner]:[])])];
+  owners.forEach(p=>oc.append(chip(`<span class="dot" style="background:${cssColor(p)}"></span>${COLORS[p]}`,t?.owner===p,()=>set({owner:p,v:t&&!t.rock?t.v:1}))));
+  oc.append(chip("Rock",!!t?.rock,()=>set({rock:true})));
+  const vc=$("valChips"); vc.innerHTML="";
+  if(t&&!t.rock){
+    for(let v=1;v<=8;v++) vc.append(chip(String(v),t.v===v,()=>set({...t,v}),"num"));
+    if(t.owner) vc.append(chip("Wild",t.v==="W",()=>set({...t,v:"W"})));
+  }
+}
+
+function renderTally(res,counts,foreign){
+  const P=state.players, twoP=state.size===9;
+  const warn=[];
+  if(twoP&&P.length!==2) warn.push("The 9×9 board is the 2-player side. Pick exactly two players to score majorities.");
+  if(!twoP&&(P.length<3||P.length>4)) warn.push("The 11×11 board is the 3–4 player side. Pick 3 or 4 players.");
+  if(foreign.length) warn.push(`Tiles on the board belong to ${foreign.map(f=>COLORS[f]).join(", ")}, who isn't marked as a player.`);
+  $("warn").hidden=!warn.length; $("warn").textContent=warn.join(" ");
+
+  const totals=P.map(p=>{ const r=res[p]; const tr=Number(state.track[p])||0; return tr+r.strand+r.q.reduce((a,b)=>a+b,0); });
+  const best=Math.max(...totals);
+  let h=`<thead><tr><th>Player</th><th>Track</th><th>Stranded</th>${QNAMES.map((_,i)=>`<th title="${QNAMES[i]}">Q${i+1}</th>`).join("")}<th>Total</th></tr></thead><tbody>`;
+  P.forEach((p,i)=>{ const r=res[p];
+    h+=`<tr><td><span class="who"><span class="dot" style="background:${cssColor(p)}"></span>${COLORS[p]}</span></td>
+      <td><input class="trk" type="number" inputmode="numeric" id="trk-${p}" aria-label="${COLORS[p]} score track" value="${state.track[p]??""}" placeholder="0"></td>
+      <td class="${cls(r.strand)}">${r.strand?r.strand:"0"}</td>
+      ${r.q.map(v=>`<td class="${cls(v)}">${fmt(v)}</td>`).join("")}
+      <td><b id="tot-${p}">${totals[i]}</b>${P.length>1&&totals[i]===best?'<span class="winner">lead</span>':""}</td></tr>`;
+  });
+  h+="</tbody>";
+  $("tally").innerHTML=h;
+  P.forEach(p=>{ const inp=$("trk-"+p); inp.oninput=()=>{ state.track[p]=inp.value; renderTally(res,counts,foreign); const el=$("trk-"+p); el.focus(); el.setSelectionRange?.(99,99); }; });
+
+  $("quads").innerHTML=counts.map((cnt,q)=>`<div class="q"><span class="label">Q${q+1} · ${QNAMES[q]}</span>${
+    P.map(p=>`<div><span class="who"><span class="dot" style="background:${cssColor(p)}"></span>${cnt[p]} tile${cnt[p]===1?"":"s"}</span><span class="${cls(res[p].q[q])}">${fmt(res[p].q[q])}</span></div>`).join("")}</div>`).join("");
+
+  $("strands").innerHTML=P.map(p=>{ const s=res[p].strandTiles; return `<div><b>${COLORS[p]}</b> stranded: ${s.length?s.join(", ")+` → ${res[p].strand}`:"none"}</div>`; }).join("");
+
+  $("rulesNote").textContent = twoP
+    ? "2 players, per quadrant: most tiles scores +10. The other player scores −10 with 0 tiles, −5 with 1–2, −2 with 3, 0 with 4+. Ties split the combined points, rounded down."
+    : "3–4 players, per quadrant: 20 / 16 / 10 / 8 for 1st–4th by tile count. You need at least one tile to place. Ties add up the tied places and split, rounded down.";
+}
+
+/* ---------- size / clear ---------- */
+function resize(n){ state.size=n; state.cells=blank(n); placeRock(); state.sel=null; state.unsure=new Set(); render(); }
+$("sz9").onclick=()=>{ if(state.size!==9) resize(9); };
+$("sz11").onclick=()=>{ if(state.size!==11) resize(11); };
+$("clearBtn").onclick=()=>resize(state.size);
+$("exampleBtn").onclick=()=>{ loadExample(); setStatus("Showing an example board. Tap any space to change it."); render(); };
+
+document.addEventListener("keydown",e=>{
+  if(!state.sel||e.target.tagName==="INPUT") return;
+  const [r,c]=state.sel, n=state.size, t=state.cells[r][c];
+  const mv={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1]}[e.key];
+  if(mv){ e.preventDefault(); state.sel=[Math.min(n-1,Math.max(0,r+mv[0])),Math.min(n-1,Math.max(0,c+mv[1]))]; render(); return; }
+  if(/^[1-8]$/.test(e.key)){ state.cells[r][c]={owner:t&&!t.rock?t.owner:null,v:+e.key}; render(); }
+  if(e.key==="Backspace"||e.key==="Delete"){ state.cells[r][c]=null; render(); }
+});
+
+/* ---------- photo reading ---------- */
+function setStatus(msg,err){ for(const id of ["status","status0"]){ $(id).textContent=msg; $(id).classList.toggle("err",!!err); } }
+
+const PROMPT = `You are reading a top-down photo of the board game Arribada to score it.
+
+The board is a square grid of spaces: 9x9 (2-player side) or 11x11 (3-4 player side). Count the spaces carefully along the outer edges first. Dark brown "nest" spaces sit at every other row and column starting from the corners, which helps you count. The exact center space holds a large dark rock. Dotted lines split the board into quadrants; ignore them.
+
+Tiles are turtle-shaped and numbered 1-8. Read the large number in the middle; ignore the small numbers on the tile edges ("10" on 1-tiles, "0" on 7 and 8 tiles).
+- A tile with no colored shell is NEUTRAL.
+- A tile with a colored round shell disc on it belongs to that player. Its number usually shows on or through the disc.
+- A player's tile with a shell but no number visible (face-down tile) is WILD.
+Player shell colors (exactly four exist): pink, purple, green (a yellow-green/chartreuse), blue (a teal/turquoise). Use the closest one.
+
+Reply with only JSON in this shape:
+{"size":9,"rows":[[".",".", ...], ...],"uncertain":[[row,col]],"notes":"short note"}
+- "rows": exactly size arrays of exactly size strings, top row first as the photo shows it.
+- Cell codes: "." empty, "R" rock, "N5" neutral tile showing 5, "pink:5" pink player's 5, "pink:W" pink wild.
+- "uncertain": 0-based [row,col] of any cell you are not sure about (number or color).
+Double-check each tile's row and column by counting from the nearest board edge.`;
+
+let sample=null;
+(async()=>{
+  try{ sample = window.claude ? await window.claude.use("sample") : null; }catch{ sample=null; }
+  let canImg=false;
+  if(sample){ try{ canImg=!!(await sample.limits())?.images; }catch{} }
+  if(!canImg){
+    $("shootLbl").style.opacity=.5; $("shoot").disabled=true;
+    setStatus("Photo reading works when this page is opened in Claude. You can still set up the board by tapping spaces.");
+  }
+})();
+
+function parseBoard(data){
+  const n=Number(data?.size);
+  if(n!==9&&n!==11) throw new Error("size");
+  const rows=data.rows; if(!Array.isArray(rows)) throw new Error("rows");
+  const cells=blank(n);
+  for(let r=0;r<n;r++) for(let c=0;c<n;c++){
+    const s=String(rows[r]?.[c]??".").trim();
+    if(s==="R"){ cells[r][c]={rock:true}; continue; }
+    let m=s.match(/^N([1-8])$/i);
+    if(m){ cells[r][c]={owner:null,v:+m[1]}; continue; }
+    m=s.match(/^([a-z]+):([1-8W])$/i);
+    if(m&&COLORS[m[1].toLowerCase()]) cells[r][c]={owner:m[1].toLowerCase(),v:m[2].toUpperCase()==="W"?"W":+m[2]};
+  }
+  const mid=(n-1)/2; cells[mid][mid]={rock:true};
+  const unsure=new Set((data.uncertain||[]).filter(a=>Array.isArray(a)).map(([r,c])=>r+","+c));
+  return {n,cells,unsure,notes:String(data.notes||"")};
+}
+
+$("shoot").onchange=async e=>{
+  const f=e.target.files?.[0]; if(!f||!sample) return;
+  $("photoRow").hidden=false; $("status0").hidden=true;
+  $("photoImg").src=URL.createObjectURL(f);
+  $("shoot").disabled=true;
+  setStatus("Reading the board… this usually takes 20–60 seconds.");
+  try{
+    const data=await sample.json(PROMPT,{images:[f],modelTier:"complex"});
+    const b=parseBoard(data);
+    state.size=b.n; state.cells=b.cells; state.unsure=b.unsure; state.sel=null;
+    const seen=[...new Set(b.cells.flat().filter(t=>t&&t.owner).map(t=>t.owner))];
+    if(seen.length) state.players=seen;
+    render();
+    const u=b.unsure.size?` ${b.unsure.size} space${b.unsure.size>1?"s are":" is"} marked “?”, so check those first.`:"";
+    setStatus(`Board read. Compare it with your photo and tap any space that's wrong.${u}${b.notes?" Note: "+b.notes:""}`);
+  }catch(err){
+    const code=err?.code;
+    const msg = code==="not_granted"||code==="sampling_disabled" ? "Claude isn't allowed to read photos on this page. Set up the board by tapping spaces instead."
+      : code==="rate_limited" ? "Too many requests right now. Wait a minute, then take the photo again."
+      : code==="image_rejected" ? "That image couldn't be used. Try a JPEG or PNG photo."
+      : code==="invalid_json"||err instanceof Error ? "Claude couldn't read a full board from that photo. Retake it from straight above with the whole board in frame."
+      : "Something went wrong reading the photo. Try again.";
+    setStatus(msg,true);
+  }finally{ $("shoot").disabled=false; e.target.value=""; }
+};
+
+loadExample(); render();
+</script>
