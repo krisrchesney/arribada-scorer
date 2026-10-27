@@ -1,0 +1,11 @@
+{
+  "name": "Arribada Scorer",
+  "short_name": "Arribada",
+  "description": "Final scoring for Arribada from a photo of the board.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#EDF3F1",
+  "theme_color": "#0E7C76",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

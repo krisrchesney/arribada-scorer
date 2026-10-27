@@ -1,0 +1,5 @@
+training/
+__pycache__/
+tests/*.webp
+tests/*.jpg
+tests/*.png
