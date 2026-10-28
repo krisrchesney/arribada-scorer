@@ -22,7 +22,7 @@
   <!-- Step 1: take a photo -->
   <section class="panel" id="stepShoot">
     <h2>Take a photo of the board</h2>
-    <p class="note">Shoot from straight above with the whole grid in frame. Any side of the table works.</p>
+    <p class="note">Get the whole board in frame, from above or at a slight angle, from any side of the table. The app finds the grid and scores it.</p>
     <div class="row">
       <label class="btn primary big" for="shoot">Take photo</label>
       <input type="file" id="shoot" accept="image/*" capture="environment" class="vh">
@@ -46,7 +46,7 @@
         <button class="chip" id="sz11b">11×11</button>
       </div>
     </div>
-    <p class="note">Drag the four dots onto the outer corners of the grid so the lines sit on the spaces.</p>
+    <p class="note" id="alignNote">Drag the four dots onto the outer corners of the grid so the lines sit on the spaces.</p>
     <div class="alignbox" id="alignBox">
       <canvas id="alignCanvas"></canvas>
       <canvas id="loupe" width="128" height="128" hidden></canvas>
@@ -62,7 +62,7 @@
     <section class="panel" aria-label="Board">
       <div class="row between">
         <h2>Check the board</h2>
-        <button id="againBtn">New photo</button>
+        <div class="row"><button id="adjustBtn">Adjust grid</button><button id="againBtn">New photo</button></div>
       </div>
       <div class="status" id="status" role="status"></div>
       <div class="boardbox"><div class="board" id="board" role="grid" aria-label="Board"></div></div>

@@ -59,6 +59,36 @@ export function warp(src, quad, S) {
 
 /* ---------- color ---------- */
 
+// Sand color in good daylight. Every photo is rescaled so its sand matches
+// this, which cancels warm indoor light, shade and camera white balance.
+const SAND_REF = [250, 210, 115];
+
+/** Per-channel white balance using the sand at the corners of plain
+ *  (non-nest) spaces, which tiles rarely cover. Returns a new ImageData. */
+export function balance(img, n) {
+  const S = img.width, d = img.data, samples = [[], [], []];
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    if (r % 2 === 0 && c % 2 === 0) continue; // nest squares are brown
+    for (const [fx, fy] of [[0.12, 0.12], [0.88, 0.12], [0.12, 0.88], [0.88, 0.88]]) {
+      const x = Math.round((c + fx) * CELL), y = Math.round((r + fy) * CELL);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const p = ((y + dy) * S + (x + dx)) * 4;
+        for (let k = 0; k < 3; k++) samples[k].push(d[p + k]);
+      }
+    }
+  }
+  const med = samples.map((a) => a.sort((x, y) => x - y)[a.length >> 1]);
+  const gain = med.map((m, k) => Math.min(2.5, Math.max(0.5, SAND_REF[k] / Math.max(m, 1))));
+  const out = new ImageData(S, S), o = out.data;
+  for (let i = 0; i < d.length; i += 4) {
+    o[i] = Math.min(255, d[i] * gain[0]);
+    o[i + 1] = Math.min(255, d[i + 1] * gain[1]);
+    o[i + 2] = Math.min(255, d[i + 2] * gain[2]);
+    o[i + 3] = 255;
+  }
+  return out;
+}
+
 export function hsv(r, g, b) {
   r /= 255; g /= 255; b /= 255;
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
@@ -74,12 +104,14 @@ export function hsv(r, g, b) {
 
 // Shell colors as hue windows. Sand sits near hue 40, so green starts above it.
 const SHELL_HUES = {
-  pink:   (h, s, v) => (h >= 320 || h < 12) && s > 0.32 && v > 0.45,
-  green:  (h, s, v) => h >= 55 && h < 120 && s > 0.38 && v > 0.35,
+  // Brown nest squares sit near hue 10-20, so pink stops short of them.
+  pink:   (h, s, v) => (h >= 320 || h < 5) && s > 0.35 && v > 0.5,
+  green:  (h, s, v) => h >= 54 && h < 120 && s > 0.5 && v > 0.35,
   blue:   (h, s, v) => h >= 150 && h < 215 && s > 0.25 && v > 0.25,
   purple: (h, s, v) => h >= 235 && h < 320 && s > 0.2 && v > 0.25,
 };
-const isWhite = (h, s, v) => s < 0.3 && v > 0.62;
+// Neutral tiles are cream in some printings and pale mint in others; both are much less saturated than shells.
+const isWhite = (h, s, v) => s < 0.42 && v > 0.6;
 const isNest = (h, s, v) => h >= 8 && h < 38 && s > 0.22 && v > 0.12 && v < 0.55;
 
 /** Best-guess grid corners: the four corner spaces are always brown nest

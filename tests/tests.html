@@ -6,7 +6,8 @@
 <script type="module">
 import { score, emptyBoard } from "../js/scoring.js";
 import { check } from "../js/checks.js";
-import { CELL, warp, readBoard, guessCorners, trainingCrops } from "../js/vision.js";
+import { CELL, warp, balance, readBoard, guessCorners, trainingCrops } from "../js/vision.js";
+import { findGrid } from "../js/detect.js";
 
 const out = document.getElementById("out");
 let pass = 0, fail = 0;
@@ -49,39 +50,79 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   log(issues.some((i) => i.text.includes("only has 10")), "check flags 18 eights");
 }
 
-// Photo pipeline on the sample photo (local only; photos are not committed).
-try {
-  const img = new Image(); img.src = "photo1.webp"; await img.decode();
-  const cv = document.createElement("canvas"); cv.width = img.width; cv.height = img.height;
-  const ctx = cv.getContext("2d"); ctx.drawImage(img, 0, 0);
-  const data = ctx.getImageData(0, 0, cv.width, cv.height);
-  const corners = [[80, 43], [593, 43], [593, 556], [80, 556]];
-  out.innerHTML += `guessCorners: ${JSON.stringify(guessCorners(data).map((p) => p.map(Math.round)))}\n`;
-  const t0 = performance.now();
-  const w = warp(data, corners, 9 * CELL);
-  const res = await readBoard(w, 9);
-  const ms = performance.now() - t0;
-  const expect = emptyBoard(9);
-  const put = (r, c, owner, v) => (expect[r - 1][c - 1] = { owner, v });
-  put(3,3,null,7); put(3,5,null,1); put(3,6,"pink",1); put(3,7,"pink","W");
-  put(4,7,"purple",4); put(4,8,"purple",4);
-  put(5,6,"purple",6); put(5,7,"purple",5); put(5,8,"purple",4); put(5,9,"purple",4);
-  put(5,3,null,8); put(6,7,"pink",3); put(7,3,null,7); put(7,5,null,5); put(7,7,null,4);
-  let right = 0, total = 0;
-  const wrong = [];
-  for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
-    total++;
-    if (eq(res.cells[r][c], expect[r][c])) right++;
-    else wrong.push(`(${r + 1},${c + 1}) got ${JSON.stringify(res.cells[r][c])} want ${JSON.stringify(expect[r][c])}`);
+// Photo pipeline on sample photos (local only; photos are not committed).
+// Board spec: one row per line, spaces separate cells.
+// "." empty, "R" rock, "n4" neutral 4, "g5" green 5, "bW" blue wild (p=pink, u=purple).
+const OWN = { p: "pink", g: "green", b: "blue", u: "purple" };
+function parseSpec(spec) {
+  return spec.trim().split("\n").map((line) => line.trim().split(/\s+/).map((t) => {
+    if (t === ".") return null;
+    if (t === "R") return { rock: true };
+    const owner = t[0] === "n" ? null : OWN[t[0]];
+    return { owner, v: t[1] === "W" ? "W" : Number(t[1]) };
+  }));
+}
+const PHOTOS = [
+  { file: "photo1.webp", corners: "auto", players: ["pink", "purple"], spec: `
+. . . . . . . . .
+. . . . . . . . .
+. . n7 . n1 p1 pW . .
+. . . . . . u4 u4 .
+. . n8 . R u6 u5 u4 u4
+. . . . . . p3 . .
+. . n7 . n5 . n4 . .
+. . . . . . . . .
+. . . . . . . . .` },
+  { file: "photo2.png", corners: "auto", players: ["green", "blue"], spec: `
+. . n4 . . . . . n6
+. . g6 g7 . . . b5 b4
+n2 g6 g5 g4 g4 g4 b3 b4 b4
+g8 g7 g5 b6 g3 b3 b2 b3 .
+g7 g6 g5 b7 R b3 b1 b3 n2
+g6 g6 g5 b8 b8 b3 b2 b3 b2
+n2 g5 g5 gW b8 b3 b3 b3 b1
+. . g5 . gW . b4 . .
+. . n7 . g1 g1 g1 g1 .` },
+];
+window.training = [];
+const total = (s, p) => s.res[p].strand + s.res[p].q.reduce((a, b) => a + b, 0);
+for (const P of PHOTOS) {
+  try {
+    const img = new Image(); img.src = P.file; await img.decode();
+    const cv = document.createElement("canvas"); cv.width = img.width; cv.height = img.height;
+    const ctx = cv.getContext("2d"); ctx.drawImage(img, 0, 0);
+    const data = ctx.getImageData(0, 0, cv.width, cv.height);
+    const expect = parseSpec(P.spec), n = expect.length;
+    const t0 = performance.now();
+    const grid = findGrid(data);
+    if (grid.size !== n) log(false, `${P.file}: detected a ${grid.size}x${grid.size} board, expected ${n}x${n}`);
+    const w = balance(warp(data, grid.corners, n * CELL), n);
+    const res = await readBoard(w, n);
+    const ms = performance.now() - t0;
+    let right = 0, cellsN = 0, tiles = 0, ownersRight = 0, flaggedWrong = 0;
+    const wrong = [];
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      cellsN++;
+      const got = res.cells[r][c], want = expect[r][c];
+      if (want && !want.rock) { tiles++; if (got && !got.rock && got.owner === want.owner) ownersRight++; }
+      if (eq(got, want)) right++;
+      else {
+        const u = res.unsure.has(r + "," + c);
+        if (u) flaggedWrong++;
+        wrong.push(`(${r + 1},${c + 1}) got ${JSON.stringify(got)} want ${JSON.stringify(want)}${u ? " [?]" : " [NOT FLAGGED]"}`);
+      }
+    }
+    log(right === cellsN, `${P.file}: ${right}/${cellsN} spaces right, owner right on ${ownersRight}/${tiles} tiles, ${flaggedWrong}/${wrong.length} misses flagged, ${ms.toFixed(0)} ms, rotation ${res.rotation}`);
+    wrong.forEach((x) => (out.innerHTML += "   " + x + "\n"));
+    const sc = score({ size: n, cells: expect, players: P.players }), sg = score({ size: n, cells: res.cells, players: P.players });
+    out.innerHTML += `   end-game points, true: ${P.players.map((p) => p + " " + total(sc, p)).join(", ")}; app: ${P.players.map((p) => p + " " + total(sg, p)).join(", ")}\n`;
+    window.training.push({ app: "arribada-scorer", version: 1, source: P.file, size: n, players: P.players, rotation: res.rotation,
+      cells: expect, crops: trainingCrops(w, n, 0, expect) });
+    const wc = document.createElement("canvas"); wc.width = wc.height = n * CELL; wc.getContext("2d").putImageData(w, 0, 0);
+    document.body.append(wc);
+  } catch (e) {
+    out.innerHTML += `(${P.file} skipped: ${e.message || e})\n`;
   }
-  log(right === total, `photo1: ${right}/${total} spaces right in ${ms.toFixed(0)} ms, rotation ${res.rotation}, unsure [${[...res.unsure].join(" ")}]`);
-  wrong.forEach((x) => (out.innerHTML += "   " + x + "\n"));
-  window.photo1Training = { app: "arribada-scorer", version: 1, size: 9, players: ["pink", "purple"], rotation: 0,
-    cells: expect, crops: trainingCrops(w, 9, 0, expect) };
-  const wc = document.createElement("canvas"); wc.width = wc.height = 9 * CELL; wc.getContext("2d").putImageData(w, 0, 0);
-  document.body.append(wc);
-} catch (e) {
-  out.innerHTML += `(photo test skipped: ${e.message || e})\n`;
 }
 out.innerHTML += `\n${pass} passed, ${fail} failed\n`;
 document.title = `${fail ? "FAIL" : "PASS"} ${pass}/${pass + fail}`;
