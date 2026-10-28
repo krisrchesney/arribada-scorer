@@ -115,7 +115,8 @@ def synthetic(n, seed=1):
 
 
 def real_crops():
-    X, y = [], []
+    """Real crops from app exports, with the file each came from."""
+    X, y, src = [], [], []
     for f in sorted(glob.glob(os.path.join(ROOT, "training", "*.json"))):
         data = json.load(open(f))
         for t in data["crops"]:
@@ -123,17 +124,29 @@ def real_crops():
                 continue
             X.append(np.array(t["crop"], np.float32).reshape(1, CROP, CROP) / 255)
             y.append(CLASSES.index(t["label"]))
+            src.append(os.path.basename(f))
     if not X:
-        return np.zeros((0, 1, CROP, CROP), np.float32), np.zeros(0, np.int64)
-    return np.stack(X), np.array(y)
+        return np.zeros((0, 1, CROP, CROP), np.float32), np.zeros(0, np.int64), np.array([])
+    return np.stack(X), np.array(y), np.array(src)
 
 
-def shift_aug(X):
-    """Small random shifts so the few real crops generalize."""
+def augment(X, rng):
+    """Small random rotation, scale, shift and contrast so a few real crops go a long way."""
     out = np.zeros_like(X)
     for i in range(len(X)):
-        dx, dy = np.random.randint(-2, 3, 2)
-        out[i] = np.roll(np.roll(X[i], dy, axis=1), dx, axis=2)
+        im = Image.fromarray((X[i, 0] * 255).astype(np.uint8))
+        im = im.rotate(rng.uniform(-8, 8), resample=Image.BILINEAR,
+                       translate=(rng.uniform(-2.5, 2.5), rng.uniform(-2.5, 2.5)))
+        w = int(round(CROP * rng.uniform(0.88, 1.12)))
+        im = im.resize((w, w), Image.BILINEAR)
+        canvas = Image.new("L", (CROP, CROP), 0)
+        off = (CROP - w) // 2
+        if w <= CROP:
+            canvas.paste(im, (off, off))
+        else:
+            canvas.paste(im.crop((-off, -off, -off + CROP, -off + CROP)), (0, 0))
+        a = np.asarray(canvas, np.float32) / 255
+        out[i, 0] = np.clip(a * rng.uniform(0.75, 1.25) + rng.uniform(-0.08, 0.08), 0, 1)
     return out
 
 
@@ -160,17 +173,18 @@ def main():
     ap.add_argument("--epochs", type=int, default=12)
     ap.add_argument("--synthetic", type=int, default=40000)
     ap.add_argument("--real-weight", type=int, default=30)
+    ap.add_argument("--holdout", default="", help="training file to leave out and report accuracy on")
+    ap.add_argument("--out", default=os.path.join(ROOT, "model", "digits.json"))
     args = ap.parse_args()
     torch.manual_seed(0); np.random.seed(0)
 
     Xs, ys = synthetic(args.synthetic)
-    Xr, yr = real_crops()
-    print(f"synthetic {len(Xs)}, real {len(Xr)}")
-    # Hold out a third of the real crops (by sample) to report real accuracy.
-    idx = np.random.permutation(len(Xr))
-    hold = idx[: len(idx) // 3] if len(Xr) >= 30 else np.array([], int)
-    trainr = np.setdiff1d(idx, hold)
-    Xtr = [Xs] + [shift_aug(Xr[trainr]) for _ in range(args.real_weight)]
+    Xr, yr, src = real_crops()
+    print(f"synthetic {len(Xs)}, real {len(Xr)} from {len(set(src))} file(s)")
+    hold = np.where(src == args.holdout)[0] if args.holdout else np.array([], int)
+    trainr = np.setdiff1d(np.arange(len(Xr)), hold)
+    rng = random.Random(0)
+    Xtr = [Xs] + [augment(Xr[trainr], rng) for _ in range(args.real_weight)]
     ytr = [ys] + [yr[trainr]] * args.real_weight
     X = torch.tensor(np.concatenate(Xtr)); y = torch.tensor(np.concatenate(ytr))
 
@@ -187,7 +201,7 @@ def main():
         if len(hold):
             with torch.no_grad():
                 acc = (net(torch.tensor(Xr[hold])).argmax(1).numpy() == yr[hold]).mean()
-            msg += f", held-out real accuracy {acc:.1%} ({len(hold)} crops)"
+            msg += f", held-out {args.holdout} accuracy {acc:.1%} ({len(hold)} tiles)"
         print(msg)
 
     with torch.no_grad():
@@ -203,8 +217,8 @@ def main():
         {"type": "fc", "out": 64, "in": 576, "w": b64(net.f1.weight), "b": b64(net.f1.bias)},
         {"type": "fc", "out": len(CLASSES), "in": 64, "w": b64(net.f2.weight), "b": b64(net.f2.bias)},
     ]
-    os.makedirs(os.path.join(ROOT, "model"), exist_ok=True)
-    out = os.path.join(ROOT, "model", "digits.json")
+    out = args.out
+    os.makedirs(os.path.dirname(out), exist_ok=True)
     json.dump({"classes": CLASSES, "size": CROP, "trainedOnRealCrops": int(len(trainr)), "layers": layers}, open(out, "w"))
     print("wrote", out, os.path.getsize(out) // 1024, "KB")
 

@@ -1,7 +1,8 @@
 import { COLORS, QNAMES, quadrant, score, emptyBoard } from "./scoring.js";
 import { check } from "./checks.js";
-import { CELL, warp, guessCorners, squareToQuad, readBoard, trainingCrops } from "./vision.js";
+import { CELL, warp, balance, squareToQuad, readBoard, trainingCrops } from "./vision.js";
 import { loadModel } from "./digits.js";
+import { findGrid } from "./detect.js";
 
 const $ = (id) => document.getElementById(id);
 const cssColor = (c) => `var(--p-${c})`;
@@ -66,17 +67,32 @@ async function loadPhoto(file) {
     const ctx = cv.getContext("2d", { willReadFrequently: true });
     ctx.drawImage(img, 0, 0, cv.width, cv.height);
     state.photo = { canvas: cv, data: ctx.getImageData(0, 0, cv.width, cv.height) };
-    // People usually shoot from the same spot, so last game's corners beat a fresh guess.
-    const last = store.get("corners", null);
-    state.corners = last ? last.map(([x, y]) => [x * cv.width, y * cv.height]) : guessCorners(state.photo.data);
-    show("stepAlign");
-    drawAlign();
   } catch {
     alertStatus("That file couldn't be opened as a photo. Try a JPEG or PNG.");
+    return;
   } finally {
     URL.revokeObjectURL(url);
   }
+
+  alertStatus("Finding the board…");
+  await new Promise((r) => setTimeout(r, 30)); // let the message paint
+  const t0 = performance.now();
+  const { width: W, height: H } = state.photo.canvas;
+  const last = store.get("corners", null);
+  const grid = findGrid(state.photo.data, { hints: last ? [last.map(([x, y]) => [x * W, y * H])] : [] });
+  state.corners = grid.corners;
+  setSize(grid.size, { resetBoard: false });
+  alertStatus("");
+  if (grid.score < GRID_CONFIDENT) {
+    $("alignNote").textContent = "Couldn't line up the grid on its own. Drag the four dots onto the outer corners of the grid, then tap Score it.";
+    show("stepAlign"); drawAlign();
+    return;
+  }
+  await scoreNow(t0);
 }
+
+// Fits on real boards score about 0.5; a wrong fit stays under about 0.4.
+const GRID_CONFIDENT = 0.42;
 
 function alertStatus(msg) {
   let el = document.querySelector("#stepShoot .status");
@@ -173,16 +189,24 @@ window.addEventListener("resize", () => { if (!$("stepAlign").hidden) drawAlign(
 $("retakeBtn").onclick = () => show("stepShoot");
 $("againBtn").onclick = () => show("stepShoot");
 
+$("adjustBtn").onclick = () => {
+  $("alignNote").textContent = "Drag the four dots onto the outer corners of the grid so the lines sit on the spaces.";
+  show("stepAlign"); drawAlign();
+};
+
 $("readBtn").onclick = async () => {
   const btn = $("readBtn");
   btn.disabled = true; btn.textContent = "Reading…";
   await new Promise((r) => setTimeout(r, 30)); // let the label paint
+  try { await scoreNow(performance.now()); } finally { btn.disabled = false; btn.textContent = "Score it"; }
+};
+
+async function scoreNow(t0) {
   try {
-    const t0 = performance.now();
     const n = state.size;
     const { width: pw, height: ph } = state.photo.canvas;
     store.set("corners", state.corners.map(([x, y]) => [x / pw, y / ph]));
-    state.warped = warp(state.photo.data, state.corners, n * CELL);
+    state.warped = balance(warp(state.photo.data, state.corners, n * CELL), n);
     const res = await readBoard(state.warped, n);
     const ms = performance.now() - t0;
     state.cells = res.cells; state.unsure = res.unsure; state.rotation = res.rotation; state.sel = null;
@@ -195,12 +219,10 @@ $("readBtn").onclick = async () => {
     show("stepResult"); render();
   } catch (err) {
     console.error(err);
-    $("status").textContent = "Couldn't read the board. Check the corners and try again, or enter it by hand.";
+    $("status").textContent = "Couldn't read the board. Tap Adjust grid to check the corners, or enter it by hand.";
     show("stepResult"); state.cells ||= emptyBoard(state.size); render();
-  } finally {
-    btn.disabled = false; btn.textContent = "Score it";
   }
-};
+}
 
 /* ---------- step 3: board, editor, scoring ---------- */
 
